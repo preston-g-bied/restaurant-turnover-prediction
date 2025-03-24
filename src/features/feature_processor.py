@@ -617,3 +617,50 @@ class FeatureProcessor:
         
         # Return selected features dataframe and feature names
         return pd.DataFrame(X_selected, columns=selected_features), selected_features
+
+    def transform_target(self, y):
+        """
+        Transform the target variable using log transformation.
+
+        Parameters:
+        -----------
+        y : pandas.Series
+            Target variable
+    
+        Returns:
+        --------
+        pandas.Series
+            Log-transformed target variable
+        """
+        self.logger.info("Applying log transformation to target variable")
+    
+        # Store original target mean and std for reference
+        self.original_target_mean = y.mean()
+        self.original_target_std = y.std()
+    
+        # Apply log transformation
+        y_transformed = np.log1p(y)
+    
+        # Store transformation parameters
+        self.target_transformed = True
+    
+        return y_transformed
+
+    def inverse_transform_target(self, y_pred):
+        """
+        Inverse transform the predicted target variable.
+    
+        Parameters:
+        -----------
+        y_pred : numpy.ndarray or pandas.Series
+            Log-transformed predictions
+    
+        Returns:
+        --------
+        numpy.ndarray
+            Original scale predictions
+        """
+        self.logger.info("Inverting log transformation of target variable")
+    
+        # Apply expm1 to reverse log1p transformation
+        return np.expm1(y_pred)

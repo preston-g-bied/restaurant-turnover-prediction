@@ -531,7 +531,7 @@ class ModelTrainer:
 
         return submission
     
-    def run_pipeline(self):
+    def run_pipeline(self, transform_target=True):
         """
         Run the full model training pipeline.
         
@@ -542,6 +542,17 @@ class ModelTrainer:
         """
         # load data
         X_train, y_train, X_test, test_ids = self.load_data()
+
+        # initialize feature processor if not already created
+        if not hasattr(self, 'feature_processor'):
+            from src.features.feature_processor import FeatureProcessor
+            self.feature_processor = FeatureProcessor(target_column='Annual Turnover')
+
+        # transform target if requested
+        if transform_target:
+            self.logger.info("Applying log transformation to target variable")
+            self.y_train_original = y_train.copy()
+            y_train = self.feature_processor.transform_target(y_train)
 
         # initialize models
         self.initialize_models()
@@ -559,9 +570,55 @@ class ModelTrainer:
         final_model = self.train_final_model(X_train, y_train)
 
         # generate submission
-        submission = self.generate_submission(final_model, X_test, test_ids)
+        if transform_target:
+        # we need to inverse transform the predictions
+            submission = self.generate_submission_with_transformed_target(
+                final_model, X_test, test_ids
+            )
+        else:
+            # Standard prediction
+            submission = self.generate_submission(final_model, X_test, test_ids)
 
         logger.info('Model training pipeline completed successfully')
+        return submission
+    
+    def generate_submission_with_transformed_target(self, model, X_test, test_ids):
+        """
+        Generate submission file with inverse transformation of target.
+    
+        Parameters:
+        -----------
+        model : estimator
+            Trained model
+        X_test : pandas.DataFrame
+            Test features
+        test_ids : pandas.Series
+            Test registration numbers
+        """
+        logger.info('Generating submission file with inverse target transformation')
+
+        # generate log-transformed predictions
+        y_pred_log = model.predict(X_test)
+    
+        # inverse transform to original scale
+        y_pred = self.feature_processor.inverse_transform_target(y_pred_log)
+
+        # create submission dataframe
+        submission = pd.DataFrame({
+            'Registration Number': test_ids,
+            'Annual Turnover': y_pred
+        })
+
+        # save submission
+        submission_path = os.path.join(
+            self.submission_dir,
+            f"submission_{self.best_model_name}_log_transform_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+        )
+        submission.to_csv(submission_path, index=False)
+
+        logger.info(f'Submission saved to {submission_path}')
+        logger.info(f"Submission predictions - Min: {y_pred.min():.2f}, Max: {y_pred.max():.2f}, Mean: {y_pred.mean():.2f}")
+
         return submission
     
 if __name__ == "__main__":
