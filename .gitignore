@@ -1,0 +1,85 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.env
+
+# Data files
+# Uncomment these if you don't want to version the raw data
+# data/raw/*.csv
+# data/raw/*.xlsx
+# data/raw/*.json
+
+# Keep processed data out of repo (large files)
+data/processed/*.csv
+data/processed/*.parquet
+data/processed/*.pkl
+
+# Keep the directory structure
+!data/processed/.gitkeep
+
+# Model files (often large)
+models/*.pkl
+models/*.h5
+models/*.joblib
+models/*.pt
+models/*.pth
+
+# Keep the directory structure
+!models/.gitkeep
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Distribution / packaging
+.Python
+wheels/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+
+# Submission files (keep the directory structure)
+!data/submissions/.gitkeep
