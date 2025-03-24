@@ -84,3 +84,5 @@ coverage.xml
 # Submission files (keep the directory structure)
 data/submissions/*
 !data/submissions/.gitkeep
+
+catboost_info
