@@ -508,7 +508,7 @@ def extract_temporal_features(df, date_col='Opening Day of Restaurant'):
 
     return df_with_temporal
 
-def encode_categorical_features(df, target_col=None, method='auto'):
+def encode_categorical_features(df, target_col=None, method='auto', cv_folds=5):
     """
     Encode categorical features with special handling for placeholder values.
     
@@ -569,9 +569,41 @@ def encode_categorical_features(df, target_col=None, method='auto'):
 
             else:   # high cardinality features
                 if target_col is not None:
-                    # target encoding
-                    te = ce.TargetEncoder()
-                    df_encoded[col] = te.fit_transform(df_encoded[col], df_encoded[target_col])
+                    from sklearn.model_selection import KFold
+                    
+                    # Create a temporary column for the encoded values
+                    encoded_col_name = f'{col}_target_encoded'
+                    df_encoded[encoded_col_name] = np.nan
+                    
+                    # Create CV folds
+                    kf = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+                    
+                    # If we have the target column in the dataframe
+                    if target_col in df_encoded.columns:
+                        # For each fold
+                        for train_idx, val_idx in kf.split(df_encoded):
+                            # Get training data for this fold
+                            X_train = df_encoded.iloc[train_idx]
+                            
+                            # Calculate target mean for each category in training data
+                            means = X_train.groupby(col)[target_col].mean()
+                            
+                            # Map means to validation data
+                            for cat, mean in means.items():
+                                mask = (df_encoded.iloc[val_idx][col] == cat)
+                                df_encoded.loc[df_encoded.index[val_idx][mask], encoded_col_name] = mean
+                            
+                            # Fill NaNs with global mean
+                            global_mean = X_train[target_col].mean()
+                            df_encoded.loc[df_encoded.index[val_idx], encoded_col_name] = \
+                                df_encoded.loc[df_encoded.index[val_idx], encoded_col_name].fillna(global_mean)
+                        
+                        # Drop original column
+                        df_encoded.drop(col, axis=1, inplace=True)
+                    else:
+                        # For test data without target column, use label encoding as fallback
+                        le = LabelEncoder()
+                        df_encoded[col] = le.fit_transform(df_encoded[col])
                 else:
                     # label encoding as fallback
                     le = LabelEncoder()

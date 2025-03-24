@@ -32,9 +32,9 @@ env/
 
 # Data files
 # Uncomment these if you don't want to version the raw data
-# data/raw/*.csv
-# data/raw/*.xlsx
-# data/raw/*.json
+data/raw/*.csv
+data/raw/*.xlsx
+data/raw/*.json
 
 # Keep processed data out of repo (large files)
 data/processed/*.csv
@@ -82,4 +82,5 @@ nosetests.xml
 coverage.xml
 
 # Submission files (keep the directory structure)
+data/submissions/*
 !data/submissions/.gitkeep
