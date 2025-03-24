@@ -559,12 +559,35 @@ class FeatureProcessor:
             ('Ambience', 'Service'),
             ('Lively', 'Privacy'),
             ('Order Wait Time', 'Food Rating'),
+
+            # Restaurant age interactions (maturity effect)
+            ('restaurant_age_years', 'Overall Restaurant Rating'),
+            ('restaurant_age_years', 'Food Rating'),
+            ('restaurant_age_years', 'Hygiene Rating'),
+        
+            # Social media interactions
+            ('Facebook Popularity Quotient', 'Instagram Popularity Quotient'),
+        
+            # Location-based interactions
+            ('Restaurant Location_Near Party Hub', 'Resturant Tier'),
+            ('Restaurant City Tier', 'Value for Money'),
+        
+            # Restaurant quality composite interactions
+            ('Food Rating', 'Overall Restaurant Rating', 'Hygiene Rating'),
+            ('Service', 'Staff Responsivness', 'Order Wait Time')
         ]
         
         # Create multiplicative interactions for features that exist
-        for col1, col2 in interactions:
-            if col1 in X.columns and col2 in X.columns:
-                X_with_interactions[f'{col1}_{col2}_interaction'] = X[col1] * X[col2]
+        for interaction in interactions:
+            if len(interaction) == 2:
+                col1, col2 = interaction
+                if col1 in X.columns and col2 in X.columns:
+                    X_with_interactions[f'{col1}_{col2}_interaction'] = X[col1] * X[col2]
+            elif len(interaction) == 3:
+                col1, col2, col3 = interaction
+                if col1 in X.columns and col2 in X.columns and col3 in X.columns:
+                    X_with_interactions[f'{col1}_{col2}_{col3}_composite'] = X[col1] * X[col2] * X[col3]
+    
         
         # Create ratio features
         ratio_features = [
@@ -573,13 +596,30 @@ class FeatureProcessor:
             ('Instagram Popularity Quotient', 'Facebook Popularity Quotient', 'social_media_balance'),
             ('Restaurant Zomato Rating', 'Overall Restaurant Rating', 'rating_discrepancy'),
             ('Food Rating', 'Hygiene Rating', 'quality_cleanliness_balance'),
-            ('Lively', 'Comfortablility', 'energy_comfort_balance')
+            ('Lively', 'Comfortablility', 'energy_comfort_balance'),
+
+            ('Food Rating', 'Staff Responsivness', 'food_service_balance'),
+            ('Hygiene Rating', 'Staff Responsivness', 'hygiene_service_balance'),
+            ('Restaurant Zomato Rating', 'Food Rating', 'external_internal_rating'),
+            ('restaurant_age_years', 'Overall Restaurant Rating', 'rating_per_year')
         ]
         
         for col1, col2, name in ratio_features:
             if col1 in X.columns and col2 in X.columns:
                 # Avoid division by 0
                 X_with_interactions[name] = X[col1] / X[col2].replace(0, 0.001)
+
+        # Create polynomial features for key ratings
+        polynomial_features = [
+            'Food Rating', 
+            'Overall Restaurant Rating',
+            'Restaurant Zomato Rating',
+            'Hygiene Rating'
+        ]
+    
+        for feature in polynomial_features:
+            if feature in X.columns:
+                X_with_interactions[f'{feature}_squared'] = X[feature] ** 2
         
         return X_with_interactions
     

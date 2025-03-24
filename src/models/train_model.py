@@ -18,8 +18,10 @@ import catboost as cb
 import joblib
 import pickle
 from pathlib import Path
+import sys
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.append(project_root)
 
 # set up logging
 logging.basicConfig(
@@ -269,65 +271,82 @@ class ModelTrainer:
                 # define hyperparameters to tune based on model type
                 if name == 'ridge':
                     param_grid = {
-                        'alpha': [0.01, 0.1, 1.0, 10.0, 100.0]
+                        'alpha': [0.001, 0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 50.0, 100.0],
+                        'fit_intercept': [True, False],
+                        'solver': ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg', 'sag', 'saga']
                     }
                 
                 elif name == 'lasso':
                     param_grid = {
-                        'alpha': [0.0001, 0.001, 0.01, 0.1, 1.0],
-                        'max_iter': [1000, 2000, 3000]
+                        'alpha': [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0],
+                        'fit_intercept': [True, False],
+                        'selection': ['cyclic', 'random'],
+                        'max_iter': [1000, 2000, 3000, 5000]
                     }
                 
                 elif name == 'elasticnet':
                     param_grid = {
-                        'alpha': [0.0001, 0.001, 0.01, 0.1, 1.0],
-                        'l1_ratio': [0.1, 0.3, 0.5, 0.7, 0.9],
-                        'max_iter': [1000, 2000]
+                        'alpha': [0.0001, 0.001, 0.01, 0.1, 0.5, 1.0, 5.0],
+                        'l1_ratio': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+                        'fit_intercept': [True, False],
+                        'selection': ['cyclic', 'random'],
+                        'max_iter': [1000, 2000, 5000]
                     }
                 
                 elif name == 'random_forest':
                     param_grid = {
-                        'n_estimators': [100, 200, 300],
-                        'max_depth': [None, 10, 20, 30],
-                        'min_samples_split': [2, 5, 10],
-                        'min_samples_leaf': [1, 2, 4]
+                        'n_estimators': [50, 100, 200, 300, 500],
+                        'max_depth': [None, 5, 10, 15, 20, 30],
+                        'min_samples_split': [2, 5, 10, 15],
+                        'min_samples_leaf': [1, 2, 4, 8],
+                        'max_features': ['auto', 'sqrt', 0.5, 0.7, 1.0]
                     }
                 
                 elif name == 'gradient_boosting':
                     param_grid = {
-                        'n_estimators': [100, 200, 300],
-                        'learning_rate': [0.01, 0.05, 0.1],
-                        'max_depth': [3, 5, 7],
-                        'subsample': [0.8, 0.9, 1.0]
+                        'n_estimators': [100, 200, 300, 500],
+                        'learning_rate': [0.01, 0.03, 0.05, 0.1, 0.2],
+                        'max_depth': [3, 4, 5, 6, 8],
+                        'min_samples_split': [2, 5, 10],
+                        'min_samples_leaf': [1, 2, 4],
+                        'subsample': [0.7, 0.8, 0.9, 1.0]
                     }
                 
                 elif name == 'xgboost':
                     param_grid = {
-                        'n_estimators': [100, 200, 300],
-                        'learning_rate': [0.01, 0.05, 0.1],
-                        'max_depth': [3, 5, 7],
-                        'subsample': [0.8, 0.9, 1.0],
-                        'colsample_bytree': [0.8, 0.9, 1.0],
-                        'reg_alpha': [0, 0.1, 1.0],
-                        'reg_lambda': [0, 0.1, 1.0]
+                        'n_estimators': [100, 200, 300, 500],
+                        'learning_rate': [0.01, 0.03, 0.05, 0.1, 0.2],
+                        'max_depth': [3, 4, 5, 6, 8],
+                        'min_child_weight': [1, 3, 5, 7],
+                        'subsample': [0.6, 0.7, 0.8, 0.9, 1.0],
+                        'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
+                        'gamma': [0, 0.1, 0.2, 0.3, 0.5],
+                        'reg_alpha': [0, 0.1, 1.0, 10.0],
+                        'reg_lambda': [0, 0.1, 1.0, 10.0]
                     }
                 
                 elif name == 'lightgbm':
                     param_grid = {
-                        'n_estimators': [100, 200, 300],
-                        'learning_rate': [0.01, 0.05, 0.1],
-                        'max_depth': [3, 5, 7, -1],
-                        'num_leaves': [31, 63, 127],
-                        'reg_alpha': [0, 0.1, 1.0],
-                        'reg_lambda': [0, 0.1, 1.0]
+                        'n_estimators': [100, 200, 300, 500],
+                        'learning_rate': [0.01, 0.03, 0.05, 0.1, 0.2],
+                        'max_depth': [3, 4, 5, 6, 8, -1],
+                        'num_leaves': [31, 63, 127, 255],
+                        'min_child_samples': [5, 10, 20, 50],
+                        'subsample': [0.6, 0.7, 0.8, 0.9, 1.0],
+                        'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
+                        'reg_alpha': [0, 0.1, 1.0, 10.0],
+                        'reg_lambda': [0, 0.1, 1.0, 10.0]
                     }
                 
                 elif name == 'catboost':
                     param_grid = {
-                        'iterations': [100, 200, 300],
-                        'learning_rate': [0.01, 0.05, 0.1],
-                        'depth': [4, 6, 8],
-                        'l2_leaf_reg': [1, 3, 5, 7]
+                        'iterations': [100, 200, 300, 500],
+                        'learning_rate': [0.01, 0.03, 0.05, 0.1, 0.2],
+                        'depth': [4, 6, 8, 10],
+                        'l2_leaf_reg': [1, 3, 5, 7, 9],
+                        'border_count': [32, 64, 128, 254],
+                        'bagging_temperature': [0, 1, 5, 10],
+                        'random_strength': [0.1, 1, 10]
                     }
                 
                 else:
@@ -335,23 +354,35 @@ class ModelTrainer:
                     continue
 
                 # create grid search
-                grid_search = GridSearchCV(
-                    model, param_grid,
-                    scoring='neg_root_mean_squared_error',
-                    cv=5, n_jobs=-1, verbose=1
-                )
+                if len(param_grid) > 4:  # If grid is very large
+                    from sklearn.model_selection import RandomizedSearchCV
+                    search = RandomizedSearchCV(
+                        model, param_grid,
+                        n_iter=50,  # Number of parameter settings sampled
+                        scoring='neg_root_mean_squared_error',
+                        cv=5, n_jobs=-1, verbose=1,
+                        random_state=self.random_state
+                    )
+                    logger.info(f"Using RandomizedSearchCV for {name} with 50 iterations")
+                else:
+                    search = GridSearchCV(
+                        model, param_grid,
+                        scoring='neg_root_mean_squared_error',
+                        cv=5, n_jobs=-1, verbose=1
+                    )
+                    logger.info(f"Using GridSearchCV for {name}")
 
                 # fit grid search
-                grid_search.fit(X_train_main, y_train_main)
+                search.fit(X_train_main, y_train_main)
 
                 # update model with best parameters
-                self.models[name] = grid_search.best_estimator_
+                self.models[name] = search.best_estimator_
 
                 # evaluate on validation set
                 y_pred = self.models[name].predict(X_val)
                 val_rmse = np.sqrt(mean_squared_error(y_val, y_pred))
 
-                logger.info(f'{name} tuned - Best parameters: {grid_search.best_params_}')
+                logger.info(f'{name} tuned - Best parameters: {search.best_params_}')
                 logger.info(f'{name} tuned - Validation RMSE: {val_rmse:.2f}')
 
                 # check if this is our new best model
@@ -454,6 +485,7 @@ class ModelTrainer:
         plt.tight_layout()
         
         # save plot
+        plt.savefig(os.path.join(project_root, 'reports', 'figures', f'{self.best_model_name}_feature_importance.png'))
         plt.savefig(f'../reports/figures/{self.best_model_name}_feature_importance.png')
         logger.info(f"Feature importance plot saved to ../reports/figures/{self.best_model_name}_feature_importance.png")
 
@@ -550,7 +582,7 @@ class ModelTrainer:
 
         # transform target if requested
         if transform_target:
-            self.logger.info("Applying log transformation to target variable")
+            logger.info("Applying log transformation to target variable")
             self.y_train_original = y_train.copy()
             y_train = self.feature_processor.transform_target(y_train)
 
