@@ -59,18 +59,6 @@ class FeatureProcessor:
     def fit_transform(self, X, y=None):
         """
         Fit all transformers and transform the input data.
-        
-        Parameters:
-        -----------
-        X : pandas.DataFrame
-            Input data with features and possibly target
-        y : pandas.Series, optional
-            Target variable if not included in X
-        
-        Returns:
-        --------
-        pandas.DataFrame
-            Transformed features
         """
         self.logger.info("Starting fit_transform process")
         
@@ -79,16 +67,21 @@ class FeatureProcessor:
             self.logger.info(f"Extracting target column '{self.target_column}' from input data")
             y = X[self.target_column].copy()
             X = X.drop(columns=[self.target_column])
-            
+        
         # Store original columns for verification
         self.original_columns = X.columns.tolist()
         self.logger.info(f"Original feature count: {len(self.original_columns)}")
         
-        # Handle missing values
-        X_processed = self._fit_handle_missing_values(X)
+        # Handle missing values with enhanced method
+        X_processed = self._handle_missing_values_enhanced(X)
+        X_processed = self._fit_handle_missing_values(X_processed)
+
+        # process entertainment features
+        X_processed = self._process_entertainment_features(X_processed)
         
-        # Extract temporal features
+        # Extract temporal features (basic and advanced)
         X_processed = self._extract_temporal_features(X_processed)
+        X_processed = self._extract_advanced_temporal_features(X_processed)
         
         # Transform numeric features
         X_processed = self._fit_transform_numeric_features(X_processed)
@@ -99,7 +92,11 @@ class FeatureProcessor:
         # Encode categorical features
         X_processed = self._fit_encode_categorical_features(X_processed, y)
         
-        # Create interaction features
+        # Apply new feature engineering steps
+        X_processed = self._create_enhanced_rating_features(X_processed)
+        X_processed = self._enhance_location_features(X_processed)
+        
+        # Create interaction features (original method)
         X_processed = self._create_interaction_features(X_processed)
         
         # Feature selection (if y is provided)
@@ -110,22 +107,10 @@ class FeatureProcessor:
         self.logger.info(f"Fit_transform complete. Final feature count: {X_processed.shape[1]}")
         
         return X_processed
-    
+        
     def transform(self, X, apply_selection=True):
         """
         Transform new data using already fitted transformers.
-        
-        Parameters:
-        -----------
-        X : pandas.DataFrame
-            Input data to transform
-        apply_selection : bool
-            Whether to apply feature selection
-        
-        Returns:
-        --------
-        pandas.DataFrame
-            Transformed features
         """
         if not self.is_fitted:
             raise ValueError("FeatureProcessor has not been fitted yet. Call fit_transform first.")
@@ -137,11 +122,16 @@ class FeatureProcessor:
             self.logger.warning(f"Removing target column '{self.target_column}' from test data")
             X = X.drop(columns=[self.target_column])
         
-        # Handle missing values
-        X_processed = self._transform_handle_missing_values(X)
+        # Handle missing values with enhanced method
+        X_processed = self._handle_missing_values_enhanced(X)
+        X_processed = self._transform_handle_missing_values(X_processed)
+
+        # process entertainment features
+        X_processed = self._process_entertainment_features(X_processed)
         
-        # Extract temporal features
+        # Extract temporal features (basic and advanced)
         X_processed = self._extract_temporal_features(X_processed)
+        X_processed = self._extract_advanced_temporal_features(X_processed)
         
         # Transform numeric features
         X_processed = self._transform_numeric_features(X_processed)
@@ -149,7 +139,11 @@ class FeatureProcessor:
         # Encode categorical features
         X_processed = self._transform_encode_categorical_features(X_processed)
         
-        # Create interaction features
+        # Apply new feature engineering steps
+        X_processed = self._create_enhanced_rating_features(X_processed)
+        X_processed = self._enhance_location_features(X_processed)
+        
+        # Create interaction features (original method)
         X_processed = self._create_interaction_features(X_processed)
         
         # Apply feature selection
@@ -269,6 +263,28 @@ class FeatureProcessor:
         
         return X_imputed
     
+    def _handle_missing_values_enhanced(self, X):
+        """
+        Enhanced missing value handling that adds indicator features but doesn't modify imputation.
+        """
+        self.logger.info("Creating enhanced missing value indicators")
+        X_enhanced = X.copy()
+        
+        # Define entertainment columns
+        entertainment_cols = ['Live Music Rating', 'Comedy Gigs Rating', 'Value Deals Rating', 'Live Sports Rating']
+        present_ent_cols = [col for col in entertainment_cols if col in X.columns]
+        
+        # Create binary indicators for feature presence with more meaningful names
+        for col in present_ent_cols:
+            feat_name = col.replace('Rating', '').strip().lower().replace(' ', '_')
+            X_enhanced[f'offers_{feat_name}'] = X[col].notna().astype(int)
+        
+        # Count how many entertainment options the restaurant offers
+        if present_ent_cols:
+            X_enhanced['entertainment_options_count'] = sum(X[col].notna() for col in present_ent_cols)
+        
+        return X_enhanced
+    
     def _extract_temporal_features(self, X):
         """
         Extract temporal features from date columns.
@@ -319,6 +335,177 @@ class FeatureProcessor:
             X_temporal = X_temporal.drop(columns=[date_col])
         
         return X_temporal
+    
+    def _extract_advanced_temporal_features(self, X):
+        """
+        Extract advanced temporal features including age buckets and seasonality.
+    
+        Parameters:
+        -----------
+        X : pandas.DataFrame
+            Input data with basic temporal features
+            
+        Returns:
+        --------
+        pandas.DataFrame
+            Data with enhanced temporal features
+        """
+        self.logger.info("Extracting advanced temporal features")
+        X_temporal = X.copy()
+
+        # Skip if we don't have the restaurant age
+        if 'restaurant_age_years' not in X_temporal.columns:
+            self.logger.warning("restaurant_age_years not found, skipping advanced temporal features")
+            return X_temporal
+        
+        # 1. Create age buckets (non-linear relationship with turnover)
+        age_bins = [0, 1, 3, 5, 10, 20, 100]
+        age_labels = ['0-1 years', '1-3 years', '3-5 years', '5-10 years', '10-20 years', '20+ years']
+        
+        X_temporal['age_bucket'] = pd.cut(
+            X_temporal['restaurant_age_years'], 
+            bins=age_bins, 
+            labels=age_labels,
+            include_lowest=True
+        )
+
+        # Convert to one-hot encoding
+        age_dummies = pd.get_dummies(X_temporal['age_bucket'], prefix='age')
+        X_temporal = pd.concat([X_temporal, age_dummies], axis=1)
+        X_temporal.drop('age_bucket', axis=1, inplace=True)
+        
+        # 2. Restaurant maturity effect (diminishing returns)
+        X_temporal['maturity_factor'] = 1 - np.exp(-X_temporal['restaurant_age_years'] / 5)
+        
+        # 3. Opening month seasonality
+        if 'opening_month' in X_temporal.columns:
+            # High season (typically November-January, and summer months)
+            X_temporal['opened_high_season'] = X_temporal['opening_month'].isin([11, 12, 1, 6, 7, 8]).astype(int)
+            
+            # Festival/holiday season opening (typically end of year)
+            X_temporal['opened_festival_season'] = X_temporal['opening_month'].isin([11, 12]).astype(int)
+            
+            # Create quarter features (already done in your code via opening_quarter)
+            
+        # 4. Day of week effect
+        if 'opening_day_of_week' in X_temporal.columns:
+            # Weekend vs weekday opening
+            X_temporal['opened_weekend'] = X_temporal['opening_day_of_week'].isin([5, 6]).astype(int)
+        
+        # 5. Key interactions between age and other features
+        if 'maturity_factor' in X_temporal.columns:
+            for col in ['Hygiene Rating', 'Food Rating', 'Restaurant Zomato Rating']:
+                if col in X_temporal.columns:
+                    # Mature restaurants might have more reliable ratings
+                    X_temporal[f'mature_{col.lower().replace(" ", "_")}'] = X_temporal['maturity_factor'] * X_temporal[col]
+        
+        return X_temporal
+    
+    def _enhance_location_features(self, X):
+        """
+        Create advanced location-based features including location type interactions.
+        
+        Parameters:
+        -----------
+        X : pandas.DataFrame
+            Input data
+                
+        Returns:
+        --------
+        pandas.DataFrame
+            Data with enhanced location features
+        """
+        self.logger.info("Enhancing location features")
+        X_location = X.copy()
+        
+        # 1. Create city tier groupings (if City_encoded exists)
+        if 'City_encoded' in X_location.columns:
+            # Our City has already been encoded to a numerical value
+            # We can use the encoded value to create tier features
+            X_location['major_city_indicator'] = (X_location['City_encoded'] > X_location['City_encoded'].median()).astype(int)
+        
+        # 2. Create interactions between location type and other features
+        location_cols = [col for col in X_location.columns if 'Restaurant Location' in col]
+        if location_cols:
+            # For party hubs - entertainment and liveliness likely more important
+            if 'Restaurant Location_Near Party Hub' in X_location.columns:
+                party_hub = X_location['Restaurant Location_Near Party Hub']
+                
+                # Social media might have different impact at party hubs
+                if 'Facebook Popularity Quotient' in X_location.columns:
+                    X_location['party_hub_social_impact'] = party_hub * X_location['Facebook Popularity Quotient']
+                
+                # Lively rating likely more important at party hubs
+                if 'Lively' in X_location.columns:
+                    X_location['party_hub_lively_effect'] = party_hub * X_location['Lively']
+                    
+                # Entertainment options might be more valuable at party hubs
+                if 'entertainment_options_count' in X_location.columns:
+                    X_location['party_hub_entertainment_effect'] = party_hub * X_location['entertainment_options_count']
+            
+            # For business hubs - food quality and service likely more important
+            if 'Restaurant Location_Near Business Hub' in X_location.columns or 'Restaurant Location_Near Party Hub' in X_location.columns:
+                # Infer business hub as opposite of party hub if needed
+                if 'Restaurant Location_Near Business Hub' in X_location.columns:
+                    business_hub = X_location['Restaurant Location_Near Business Hub']
+                else:
+                    business_hub = 1 - X_location['Restaurant Location_Near Party Hub']
+                
+                # Food rating likely more important at business hubs
+                if 'Food Rating' in X_location.columns:
+                    X_location['business_hub_food_effect'] = business_hub * X_location['Food Rating']
+                
+                # Service likely more important at business hubs
+                if 'Service' in X_location.columns:
+                    X_location['business_hub_service_effect'] = business_hub * X_location['Service']
+        
+        # 3. Combine Restaurant City Tier with location type
+        if 'Restaurant City Tier' in X_location.columns:
+            for loc_col in location_cols:
+                X_location[f'{loc_col}_city_tier_effect'] = X_location[loc_col] * X_location['Restaurant City Tier']
+        
+        return X_location
+    
+    def _process_entertainment_features(self, X):
+        """
+        Process entertainment features after imputation.
+        """
+        self.logger.info("Processing entertainment features")
+        X_processed = X.copy()
+        
+        # Define entertainment columns
+        entertainment_cols = ['Live Music Rating', 'Comedy Gigs Rating', 'Value Deals Rating', 'Live Sports Rating']
+        present_ent_cols = [col for col in entertainment_cols if col in X.columns]
+        
+        # Set imputed values to 0 for restaurants that don't offer the feature
+        for col in present_ent_cols:
+            if col in X.columns:
+                indicator = f'offers_{col.replace("Rating", "").strip().lower().replace(" ", "_")}'
+                if indicator in X.columns:
+                    # Keep original values where the feature exists
+                    # Set to 0 where the restaurant doesn't offer the feature
+                    X_processed[col] = X_processed[col] * X_processed[indicator]
+        
+        # Calculate average entertainment quality among offered options
+        if present_ent_cols:
+            # Create a mask of restaurants with at least one entertainment option
+            has_entertainment = X_processed[[f'offers_{col.replace("Rating", "").strip().lower().replace(" ", "_")}' 
+                            for col in present_ent_cols]].sum(axis=1) > 0
+            
+            # Calculate average rating only for restaurants with entertainment
+            X_processed['avg_entertainment_quality'] = np.nan
+            if has_entertainment.any():
+                # Create a masked dataframe of ratings
+                ratings = X_processed[present_ent_cols].copy()
+                # Zero values would skew the average, so replace them with NaN
+                for col in present_ent_cols:
+                    indicator = f'offers_{col.replace("Rating", "").strip().lower().replace(" ", "_")}'
+                    ratings.loc[X_processed[indicator] == 0, col] = np.nan
+                
+                # Calculate row-wise mean, ignoring NaN values
+                X_processed.loc[has_entertainment, 'avg_entertainment_quality'] = ratings.mean(axis=1)
+        
+        return X_processed
     
     def _fit_transform_numeric_features(self, X):
         """
@@ -623,7 +810,7 @@ class FeatureProcessor:
         
         return X_with_interactions
     
-    def _fit_select_features(self, X, y, k=20):
+    def _fit_select_features(self, X, y, k=40):
         """
         Fit feature selector and select top k features.
         
@@ -657,6 +844,88 @@ class FeatureProcessor:
         
         # Return selected features dataframe and feature names
         return pd.DataFrame(X_selected, columns=selected_features), selected_features
+
+    def _create_enhanced_rating_features(self, X):
+        """
+        Create advanced rating-based features including composites, ratios, and non-linear transformations.
+    
+        Parameters:
+        -----------
+        X : pandas.DataFrame
+            Input data
+            
+        Returns:
+        --------
+        pandas.DataFrame
+            Data with enhanced rating features
+        """
+        self.logger.info('Creating enhanced rating features')
+        X_enhanced = X.copy()
+
+        # list of rating columns
+        rating_cols = [col for col in X.columns if 'Rating' in col]
+
+        # 1. weighted composite scores - prioritizing ratings with highest correlation to target
+        if all(x in X.columns for x in ['Hygene Rating', 'Food Rating', 'Overall Restaurant Rating']):
+            # primary quality score (weights based on EDA correlation analysis)
+            X_enhanced['quality_score'] = (
+                X['Hygene Rating'] * 0.5 +
+                X['Food Rating'] * 0.3 +
+                X['Overall Restaurant Rating'] * 0.2
+            )
+
+        if all(x in X.columns for x in ['Restaurant Zomato Rating', 'Food Rating']):
+            # external vs internal perception ga
+            X_enhanced['rating_perception_gap'] = X['Restaurant Zomato Rating'] - (X['Food Rating'] / 2.0)
+            X_enhanced['rating_consistency'] = abs(X['Restaurant Zomato Rating'] - (X['Food Rating'] / 2.0))
+
+        # 2. entertainment rating presence and quality
+        entertainment_cols = ['Live Music Rating', 'Comedy Gigs Rating', 'Value Deals Rating', 'Live Sports Rating']
+        present_cols = [f'has_{col.lower().replace(" ", "_")}' for col in entertainment_cols]
+
+        # Count how many entertainment options the restaurant offers
+        if all(x in X.columns for x in present_cols):
+            X_enhanced['entertainment_options_count'] = X[present_cols].sum(axis=1)
+    
+        # Average entertainment quality (only for restaurants that offer entertainment)
+        ent_cols_exist = [col for col in entertainment_cols if col in X.columns]
+        if ent_cols_exist:
+            # Create mask for restaurants with at least one entertainment option
+            has_entertainment = (X[ent_cols_exist].notna().sum(axis=1) > 0)
+            # Initialize with NaN
+            X_enhanced['avg_entertainment_quality'] = float('nan')
+            # Calculate only for those with entertainment
+            X_enhanced.loc[has_entertainment, 'avg_entertainment_quality'] = (
+                X.loc[has_entertainment, ent_cols_exist].mean(axis=1)
+            )
+
+        # 3. Non-linear transformations of key ratings
+        for col in rating_cols:
+            if col in X.columns:
+                # Squared terms (already in your code, but expanded for more ratings)
+                X_enhanced[f'{col}_squared'] = X[col] ** 2
+            
+                # Cubic terms for ratings with high correlation to target
+                if col in ['Hygiene Rating', 'Food Rating']:
+                    X_enhanced[f'{col}_cubed'] = X[col] ** 3
+                
+                # Exponential transformation to emphasize high ratings
+                X_enhanced[f'{col}_exp'] = np.exp(X[col] / 10) - 1  # Scaled to avoid overflow
+
+        # 4. Rating "variance" - restaurants with consistent vs inconsistent ratings
+        if len(rating_cols) >= 3:
+            present_rating_cols = [col for col in rating_cols if col in X.columns]
+            # Normalize ratings to same scale (0-1) before calculating variance
+            if len(present_rating_cols) >= 3:
+                normalized_ratings = X[present_rating_cols].copy()
+                for col in present_rating_cols:
+                    max_val = 10 if 'Overall' in col or 'Food' in col or 'Hygiene' in col else 5
+                    normalized_ratings[col] = X[col] / max_val
+            
+                X_enhanced['rating_variance'] = normalized_ratings.var(axis=1)
+                X_enhanced['rating_range'] = normalized_ratings.max(axis=1) - normalized_ratings.min(axis=1)
+    
+        return X_enhanced
 
     def transform_target(self, y):
         """
