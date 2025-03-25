@@ -23,6 +23,8 @@ import sys
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(project_root)
 
+from src.models.hybrid_model import HybridModel
+
 # set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -145,6 +147,30 @@ class ModelTrainer:
         self.models['xgboost'] = xgb.XGBRegressor(random_state=self.random_state)
         self.models['lightgbm'] = lgb.LGBMRegressor(random_state=self.random_state, verbose=-1)
         self.models['catboost'] = cb.CatBoostRegressor(random_state=self.random_state, verbose=0)
+
+        # Add hybrid model
+        self.models['hybrid'] = HybridModel(
+            linear_model=ElasticNet(alpha=0.01, l1_ratio=0.7, max_iter=2000, random_state=self.random_state),
+            nonlinear_model=lgb.LGBMRegressor(
+                n_estimators=200, 
+                learning_rate=0.05, 
+                max_depth=5,
+                num_leaves=31,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=self.random_state,
+                verbose=-1
+            ),
+            error_model=xgb.XGBRegressor(
+                n_estimators=100,
+                learning_rate=0.03,
+                max_depth=3,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=self.random_state
+            ),
+            alpha=0.6  # Weight slightly more to linear component (can tune this)
+        )
         
         logger.info(f"Initialized {len(self.models)} models")
 
@@ -563,7 +589,7 @@ class ModelTrainer:
 
         return submission
     
-    def run_pipeline(self, transform_target=True):
+    def run_pipeline(self, transform_target=True, explore_transformations=True):
         """
         Run the full model training pipeline.
         
@@ -582,9 +608,17 @@ class ModelTrainer:
 
         # transform target if requested
         if transform_target:
-            logger.info("Applying log transformation to target variable")
+            logger.info("Applying transformation to target variable")
             self.y_train_original = y_train.copy()
-            y_train = self.feature_processor.transform_target(y_train)
+            
+            if explore_transformations:
+                logger.info("Exploring optimal target transformations")
+                y_train = self.feature_processor.transform_target(y_train, X_train, explore=True)
+                # Log the selected transformation
+                logger.info(f"Selected transformation: {self.feature_processor.target_transformation}")
+            else:
+                # Just use log transformation
+                y_train = self.feature_processor.transform_target(y_train, explore=False)
 
         # initialize models
         self.initialize_models()
@@ -614,10 +648,168 @@ class ModelTrainer:
         logger.info('Model training pipeline completed successfully')
         return submission
     
+    def run_hybrid_pipeline(self, transform_target=True, explore_transformations=True):
+        """
+        Run a training pipeline focused on the hybrid model.
+        
+        Parameters:
+        -----------
+        transform_target : bool
+            Whether to apply transformation to target variable
+        explore_transformations : bool
+            Whether to explore different target transformations
+            
+        Returns:
+        --------
+        pandas.DataFrame
+            Submission file
+        """
+        # load data
+        X_train, y_train, X_test, test_ids = self.load_data()
+
+        # initialize feature processor if not already created
+        if not hasattr(self, 'feature_processor'):
+            from src.features.feature_processor import FeatureProcessor
+            self.feature_processor = FeatureProcessor(target_column='Annual Turnover')
+
+        # transform target if requested
+        if transform_target:
+            logger.info("Applying transformation to target variable")
+            self.y_train_original = y_train.copy()
+            
+            if explore_transformations:
+                logger.info("Exploring optimal target transformations")
+                y_train = self.feature_processor.transform_target(y_train, X_train, explore=True)
+                # Log the selected transformation
+                logger.info(f"Selected transformation: {self.feature_processor.target_transformation}")
+            else:
+                # Just use log transformation
+                y_train = self.feature_processor.transform_target(y_train, explore=False)
+
+        # Create train/validation split for preliminary evaluation
+        from sklearn.model_selection import train_test_split
+        X_train_split, X_val, y_train_split, y_val = train_test_split(
+            X_train, y_train, test_size=0.2, random_state=self.random_state
+        )
+
+        # Initialize and train the hybrid model
+        logger.info("Initializing and training the hybrid model")
+        hybrid_model = HybridModel(
+            linear_model=Lasso(alpha=0.01, max_iter=2000, random_state=self.random_state),
+            nonlinear_model=lgb.LGBMRegressor(
+                n_estimators=200, 
+                learning_rate=0.05, 
+                max_depth=5,
+                num_leaves=31,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=self.random_state,
+                verbose=-1
+            ),
+            error_model=xgb.XGBRegressor(
+                n_estimators=100,
+                learning_rate=0.03,
+                max_depth=3,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=self.random_state
+            ),
+            alpha=0.6  # Weight slightly more to linear component
+        )
+
+        # Train on split training data
+        hybrid_model.fit(X_train_split, y_train_split)
+        
+        # Evaluate on validation set
+        val_preds = hybrid_model.predict(X_val)
+        val_rmse = np.sqrt(mean_squared_error(y_val, val_preds))
+        logger.info(f"Hybrid model validation RMSE: {val_rmse:.4f}")
+        
+        # Now train on full training data
+        logger.info("Training final hybrid model on all data")
+        final_hybrid_model = HybridModel(
+            linear_model=Lasso(alpha=0.01, max_iter=2000, random_state=self.random_state),
+            nonlinear_model=lgb.LGBMRegressor(
+                n_estimators=200, 
+                learning_rate=0.05, 
+                max_depth=5,
+                num_leaves=31,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=self.random_state,
+                verbose=-1
+            ),
+            error_model=xgb.XGBRegressor(
+                n_estimators=100,
+                learning_rate=0.03,
+                max_depth=3,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=self.random_state
+            ),
+            alpha=0.6
+        )
+        final_hybrid_model.fit(X_train, y_train)
+        
+        # Save the model
+        model_path = os.path.join(self.models_dir, 'hybrid_model_final.pkl')
+        joblib.dump(final_hybrid_model, model_path)
+        logger.info(f"Hybrid model saved to {model_path}")
+        
+        # Save model information
+        model_info = {
+            'model_name': 'hybrid',
+            'model_params': {
+                'alpha': final_hybrid_model.alpha,
+                'linear_model': str(final_hybrid_model.linear_model),
+                'nonlinear_model': str(final_hybrid_model.nonlinear_model),
+                'error_model': str(final_hybrid_model.error_model)
+            },
+            'validation_rmse': val_rmse,
+            'transformation': self.feature_processor.target_transformation if hasattr(self.feature_processor, 'target_transformation') else 'log'
+        }
+        
+        with open(os.path.join(self.models_dir, 'hybrid_model_info.pkl'), 'wb') as f:
+            pickle.dump(model_info, f)
+        
+        # Generate predictions on test data
+        logger.info("Generating predictions for test data")
+        y_pred_transformed = final_hybrid_model.predict(X_test)
+        
+        # Inverse transform predictions
+        if transform_target:
+            y_pred = self.feature_processor.inverse_transform_target(y_pred_transformed)
+        else:
+            y_pred = y_pred_transformed
+        
+        # Create submission
+        submission = pd.DataFrame({
+            'Registration Number': test_ids,
+            'Annual Turnover': y_pred
+        })
+        
+        # Save submission
+        submission_path = os.path.join(
+            self.submission_dir,
+            f"submission_hybrid_model_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+        )
+        submission.to_csv(submission_path, index=False)
+        
+        logger.info(f"Submission saved to {submission_path}")
+        logger.info(f"Prediction statistics - Min: {y_pred.min():.2f}, Max: {y_pred.max():.2f}, Mean: {y_pred.mean():.2f}")
+        
+        # Analysis of feature importances
+        if hasattr(final_hybrid_model, 'get_feature_importances'):
+            feature_importances = final_hybrid_model.get_feature_importances()
+            feature_importances.to_csv(os.path.join(self.models_dir, 'hybrid_feature_importances.csv'))
+            logger.info("Feature importances saved to hybrid_feature_importances.csv")
+        
+        return submission
+    
     def generate_submission_with_transformed_target(self, model, X_test, test_ids):
         """
         Generate submission file with inverse transformation of target.
-    
+
         Parameters:
         -----------
         model : estimator
@@ -629,11 +821,11 @@ class ModelTrainer:
         """
         logger.info('Generating submission file with inverse target transformation')
 
-        # generate log-transformed predictions
-        y_pred_log = model.predict(X_test)
-    
+        # generate transformed predictions
+        y_pred_transformed = model.predict(X_test)
+
         # inverse transform to original scale
-        y_pred = self.feature_processor.inverse_transform_target(y_pred_log)
+        y_pred = self.feature_processor.inverse_transform_target(y_pred_transformed)
 
         # create submission dataframe
         submission = pd.DataFrame({
@@ -642,9 +834,10 @@ class ModelTrainer:
         })
 
         # save submission
+        transformation_name = self.feature_processor.target_transformation
         submission_path = os.path.join(
             self.submission_dir,
-            f"submission_{self.best_model_name}_log_transform_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+            f"submission_{self.best_model_name}_{transformation_name}_transform_{time.strftime('%Y%m%d_%H%M%S')}.csv"
         )
         submission.to_csv(submission_path, index=False)
 

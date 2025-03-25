@@ -1,0 +1,41 @@
+,linear,nonlinear,combined
+City_encoded,4.901859852771991e-07,237,94.8000002941116
+maturity_factor,0.0,232,92.80000000000001
+mature_restaurant_zomato_rating,0.0,206,82.4
+restaurant_age_years_Overall Restaurant Rating_interaction,0.003273359913885082,195,78.00196401594833
+rating_variance,0.0,190,76.0
+Overall Restaurant Rating_Instagram Popularity Quotient_interaction,0.002027719961193648,186,74.40121663197672
+Cuisine_encoded,3.217726464807813e-07,186,74.40000019306359
+Facebook Popularity Quotient_Instagram Popularity Quotient_interaction,0.0006149614503092546,181,72.4003689768702
+Instagram Popularity Quotient,0.0,169,67.60000000000001
+Overall Restaurant Rating_Facebook Popularity Quotient_interaction,0.0011389020674420452,138,55.20068334124047
+Facebook Popularity Quotient_log,0.0,135,54.0
+Food Rating_Overall Restaurant Rating_Hygiene Rating_composite,0.001996578267173719,128,51.201197946960306
+quality_cleanliness_balance,0.0,119,47.6
+mature_hygiene_rating,0.0,110,44.0
+restaurant_age_years_Hygiene Rating_interaction,0.09159459086214645,108,43.25495675451729
+food_service_balance,0.0,62,24.8
+Live Music Rating_exp,0.0,60,24.0
+Hygiene Rating_Food Rating_interaction,0.010372857084440351,53,21.206223714250665
+Staff Responsivness,0.420647282580683,45,18.25238836954841
+Facebook Popularity Quotient,0.0,44,17.6
+Instagram Popularity Quotient_log,0.0,39,15.600000000000001
+Value for Money,0.0,38,15.200000000000001
+restaurant_age_years,0.0,36,14.4
+Resturant Tier,0.2138863751681705,32,12.928331825100903
+Overall Restaurant Rating,0.0,28,11.200000000000001
+rating_range,0.0,26,10.4
+Restaurant Zomato Rating_squared,0.09530133659875173,22,8.857180801959252
+Live Music Rating_squared,0.06709368895267999,11,4.440256213371608
+Hygiene Rating_squared,0.0,11,4.4
+restaurant_age_days,0.0005615237307101343,8,3.2003369142384264
+Hygiene Rating_cubed,0.005110658367744094,5,2.0030663950206464
+Live Music Rating_log_squared,0.0,3,1.2000000000000002
+major_city_indicator,0.0,2,0.8
+Restaurant Zomato Rating_exp,0.0,2,0.8
+Restaurant Zomato Rating,0.0,1,0.4
+Live Music Rating,0.08637935303603818,0,0.051827611821622904
+Hygiene Rating_exp,0.0,0,0.0
+opening_year,0.0,0,0.0
+restaurant_age_days_log,0.0,0,0.0
+Hygiene Rating,0.0,0,0.0

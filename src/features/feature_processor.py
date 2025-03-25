@@ -926,50 +926,211 @@ class FeatureProcessor:
                 X_enhanced['rating_range'] = normalized_ratings.max(axis=1) - normalized_ratings.min(axis=1)
     
         return X_enhanced
-
-    def transform_target(self, y):
+    
+    def explore_target_transformations(self, y, X=None):
         """
-        Transform the target variable using log transformation.
+        Explore multiple target transformations and select the best one.
+        
+        Parameters:
+        -----------
+        y : pandas.Series
+            Target variable to transform
+        X : pandas.DataFrame, optional
+            Feature data for cross-validation evaluation
+            
+        Returns:
+        --------
+        tuple
+            (best_transformation_name, transformed_target, transformation_details)
+        """
+        from scipy import stats
+        import warnings
+        from sklearn.model_selection import cross_val_score
+        from sklearn.linear_model import Ridge
+        from sklearn.exceptions import ConvergenceWarning
+        
+        self.logger.info("Exploring target variable transformations")
+        
+        # Store original target for reference
+        self.original_target = y.copy()
+        self.original_target_mean = y.mean()
+        self.original_target_std = y.std()
+        
+        # Define transformations to try
+        transformations = {
+            'identity': {
+                'transform': lambda x: x,
+                'inverse': lambda x: x,
+                'transformed': y.copy()
+            },
+            'log': {
+                'transform': lambda x: np.log1p(x),
+                'inverse': lambda x: np.expm1(x),
+                'transformed': np.log1p(y)
+            },
+            'sqrt': {
+                'transform': lambda x: np.sqrt(x),
+                'inverse': lambda x: np.square(x),
+                'transformed': np.sqrt(y)
+            }
+        }
+        
+        # Try Box-Cox transformation (requires positive values)
+        if y.min() > 0:
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=RuntimeWarning)
+                    boxcox_transformed, lambda_param = stats.boxcox(y)
+                    transformations['boxcox'] = {
+                        'transform': lambda x: stats.boxcox(x, lambda_param),
+                        'inverse': lambda x: stats.inv_boxcox(x, lambda_param),
+                        'transformed': boxcox_transformed,
+                        'lambda': lambda_param
+                    }
+            except Exception as e:
+                self.logger.warning(f"Box-Cox transformation failed: {str(e)}")
+        
+        # Try Yeo-Johnson transformation (works with negative values)
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                yeojohnson_transformed, lambda_param = stats.yeojohnson(y)
+                transformations['yeojohnson'] = {
+                    'transform': lambda x: stats.yeojohnson(x, lambda_param),
+                    'inverse': lambda x: stats.inv_yeojohnson(x, lambda_param),
+                    'transformed': yeojohnson_transformed,
+                    'lambda': lambda_param
+                }
+        except Exception as e:
+            self.logger.warning(f"Yeo-Johnson transformation failed: {str(e)}")
+        
+        # Evaluate transformations using cross-validation if features are provided
+        results = {}
+        best_score = float('inf')
+        best_transformation = 'log'  # Default to log transformation
+        
+        if X is not None:
+            self.logger.info("Evaluating transformations using cross-validation")
+            
+            for name, transform_info in transformations.items():
+                y_transformed = transform_info['transformed']
+                
+                try:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=ConvergenceWarning)
+                        
+                        # Use Ridge regression for evaluation
+                        model = Ridge(alpha=1.0)
+                        scores = cross_val_score(
+                            model, X, y_transformed, 
+                            cv=5, 
+                            scoring='neg_mean_squared_error',
+                            n_jobs=-1
+                        )
+                        
+                        # Convert scores to positive RMSE
+                        rmse = np.sqrt(-np.mean(scores))
+                        results[name] = rmse
+                        
+                        self.logger.info(f"Transformation '{name}' - RMSE: {rmse:.4f}")
+                        
+                        # Update best transformation if this one is better
+                        if rmse < best_score:
+                            best_score = rmse
+                            best_transformation = name
+                except Exception as e:
+                    self.logger.warning(f"Error evaluating transformation '{name}': {str(e)}")
+        else:
+            # Without features for cross-validation, use Shapiro-Wilk test for normality
+            self.logger.info("No features provided, evaluating transformations using normality tests")
+            
+            for name, transform_info in transformations.items():
+                y_transformed = transform_info['transformed']
+                
+                try:
+                    # Use Shapiro-Wilk test for normality (higher p-value = more normal)
+                    shapiro_stat, shapiro_p = stats.shapiro(y_transformed[:5000])  # Limit to 5000 samples for speed
+                    results[name] = shapiro_p
+                    
+                    self.logger.info(f"Transformation '{name}' - Shapiro-Wilk p-value: {shapiro_p:.4f}")
+                    
+                    # Update best transformation if this one has higher p-value (more normal)
+                    if shapiro_p > best_score:
+                        best_score = shapiro_p
+                        best_transformation = name
+                except Exception as e:
+                    self.logger.warning(f"Error evaluating transformation '{name}': {str(e)}")
+        
+        # Store best transformation details
+        self.target_transformation = best_transformation
+        self.transformation_details = transformations[best_transformation]
+        self.target_transformed = True
+        
+        self.logger.info(f"Selected '{best_transformation}' as the best transformation")
+        
+        return best_transformation, transformations[best_transformation]['transformed'], transformations[best_transformation]
+
+    def transform_target(self, y, X=None, explore=True):
+        """
+        Transform the target variable using the best transformation or log transformation.
 
         Parameters:
         -----------
         y : pandas.Series
             Target variable
-    
+        X : pandas.DataFrame, optional
+            Feature data for cross-validation evaluation
+        explore : bool
+            Whether to explore different transformations
+        
         Returns:
         --------
         pandas.Series
-            Log-transformed target variable
+            Transformed target variable
         """
-        self.logger.info("Applying log transformation to target variable")
-    
-        # Store original target mean and std for reference
-        self.original_target_mean = y.mean()
-        self.original_target_std = y.std()
-    
-        # Apply log transformation
-        y_transformed = np.log1p(y)
-    
-        # Store transformation parameters
-        self.target_transformed = True
-    
-        return y_transformed
+        if explore:
+            self.logger.info("Exploring and applying best target transformation")
+            best_transformation, y_transformed, _ = self.explore_target_transformations(y, X)
+            return y_transformed
+        else:
+            self.logger.info("Applying log transformation to target variable")
+            
+            # Store original target mean and std for reference
+            self.original_target_mean = y.mean()
+            self.original_target_std = y.std()
+            
+            # Apply log transformation
+            y_transformed = np.log1p(y)
+            
+            # Store transformation parameters
+            self.target_transformation = 'log'
+            self.target_transformed = True
+            
+            return y_transformed
 
     def inverse_transform_target(self, y_pred):
         """
         Inverse transform the predicted target variable.
-    
+        
         Parameters:
         -----------
         y_pred : numpy.ndarray or pandas.Series
-            Log-transformed predictions
-    
+            Transformed predictions
+        
         Returns:
         --------
         numpy.ndarray
             Original scale predictions
         """
-        self.logger.info("Inverting log transformation of target variable")
-    
-        # Apply expm1 to reverse log1p transformation
-        return np.expm1(y_pred)
+        self.logger.info(f"Applying inverse {self.target_transformation} transformation")
+        
+        if hasattr(self, 'transformation_details') and self.transformation_details:
+            # Use stored transformation details
+            return self.transformation_details['inverse'](y_pred)
+        elif self.target_transformation == 'log':
+            # Apply expm1 to reverse log1p transformation
+            return np.expm1(y_pred)
+        else:
+            # If no transformation was applied or details are missing
+            self.logger.warning("No transformation details found, returning predictions as-is")
+            return y_pred

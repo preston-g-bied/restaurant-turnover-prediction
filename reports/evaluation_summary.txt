@@ -1,20 +1,18 @@
 Model Evaluation Summary
 ======================
 
-Model Name: lasso
+Model Name: ridge
 Model Parameters:
-  alpha: 1.0
+  alpha: 100.0
   copy_X: True
   fit_intercept: True
-  max_iter: 1000
+  max_iter: None
   positive: False
-  precompute: False
   random_state: 42
-  selection: cyclic
+  solver: svd
   tol: 0.0001
-  warm_start: False
-RMSE: 19638213.057352804
-MAE: 10413686.05504545
-R-squared: 0.17707082330067658
-Feature Count: 20
+RMSE: 37586039.94737773
+MAE: 30725691.47208012
+R-squared: -2.014474868419524
+Feature Count: 40
 Training Samples: 3493
