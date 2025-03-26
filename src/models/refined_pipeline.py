@@ -13,6 +13,7 @@ import scipy.stats as stats
 import logging
 import sys
 from datetime import datetime
+from scipy import special
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 
@@ -82,6 +83,11 @@ class RefinedPipeline:
             y_train_transformed, transform_details = self.try_different_transformations(y_train)
             self.logger.info(f"Selected transformation: {transform_details['name']}")
             
+            # Make sure y_train_transformed is a pandas Series with the same index as X_train
+            if isinstance(y_train_transformed, np.ndarray):
+                self.logger.info("Converting transformed target array to pandas Series")
+                y_train_transformed = pd.Series(y_train_transformed, index=X_train.index)
+
             # 5. Select features using domain knowledge and importance
             self.logger.info("Selecting features with domain knowledge")
             selected_features = self.select_features_with_domain_knowledge(X_train, y_train_transformed)
@@ -125,8 +131,11 @@ class RefinedPipeline:
                 final_preds = np.expm1(final_preds_transformed)
                 self.logger.debug(f"Applied np.expm1 transform")
             elif transform_details['name'] == 'boxcox':
-                final_preds = stats.inv_boxcox(final_preds_transformed, transform_details['lambda'])
-                self.logger.debug(f"Applied inv_boxcox transform with lambda={transform_details['lambda']}")
+                final_preds = special.inv_boxcox(final_preds_transformed, transform_details['lambda'])
+                self.logger.debug(f"Applied special.inv_boxcox transform with lambda={transform_details['lambda']}")
+            elif transform_details['name'] == 'yeojohnson':
+                final_preds = stats.inv_yeojohnson(final_preds_transformed, transform_details['lambda'])
+                self.logger.debug(f"Applied inv_yeojohnson transform with lambda={transform_details['lambda']}")
             elif transform_details['name'] == 'sqrt':
                 final_preds = np.square(final_preds_transformed)
                 self.logger.debug(f"Applied square transform")
@@ -259,6 +268,11 @@ class RefinedPipeline:
     def select_features_with_domain_knowledge(self, X_train, y_train_log, importance_threshold=0.01):
         """Select features based on both importance and domain knowledge"""
         self.logger.info("Selecting features using domain knowledge and feature importance")
+        
+        # IMPORTANT FIX: Convert numpy array to pandas Series if needed
+        if isinstance(y_train_log, np.ndarray):
+            y_train_log = pd.Series(y_train_log, index=X_train.index)
+            self.logger.info("Converted numpy array target to pandas Series")
         
         # Calculate correlations with target
         correlations = X_train.apply(lambda x: x.corr(y_train_log) 
@@ -775,24 +789,41 @@ class RefinedPipeline:
         
         from scipy import stats
         import numpy as np
+        import warnings
         
-        # Log transformation (current approach)
+        # Log transformation 
         y_log = np.log1p(y_train)
         
         # Box-Cox transformation (requires positive values)
         try:
-            self.logger.debug("Attempting Box-Cox transformation")
-            lambda_param, _ = stats.boxcox_normmax(y_train)
-            y_boxcox = stats.boxcox(y_train, lambda_param)
-            boxcox_details = {'name': 'boxcox', 
-                            'transform': lambda x: stats.boxcox(x, lambda_param),
-                            'inverse': lambda x: stats.inv_boxcox(x, lambda_param),
-                            'lambda': lambda_param}
-            self.logger.debug(f"Box-Cox lambda: {lambda_param:.4f}")
+            with warnings.catch_warnings():
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=RuntimeWarning)
+                    # Fix: boxcox_normmax returns just the lambda value
+                    lambda_param = stats.boxcox_normmax(y_train)
+                    y_boxcox = stats.boxcox(y_train, lambda_param)
+                    boxcox_details = {'name': 'boxcox', 
+                                'lambda': lambda_param}
+                    self.logger.debug(f"Box-Cox lambda: {lambda_param:.4f}")
         except Exception as e:
             self.logger.warning(f"Box-Cox transformation failed: {str(e)}")
             y_boxcox = y_log
             boxcox_details = None
+        
+        # Add Yeo-Johnson transformation (works with negative values)
+        try:
+            with warnings.catch_warnings():
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=RuntimeWarning)
+                    yj_param = stats.yeojohnson_normmax(y_train)
+                    y_yeojohnson = stats.yeojohnson(y_train, yj_param)
+                    yeojohnson_details = {'name': 'yeojohnson', 
+                                    'lambda': yj_param}
+                    self.logger.debug(f"Yeo-Johnson lambda: {yj_param:.4f}")
+        except Exception as e:
+            self.logger.warning(f"Yeo-Johnson transformation failed: {str(e)}")
+            y_yeojohnson = y_log
+            yeojohnson_details = None
         
         # Square root transformation
         y_sqrt = np.sqrt(y_train)
@@ -806,19 +837,27 @@ class RefinedPipeline:
             idx = np.random.choice(len(y_train), 5000, replace=False)
             log_stat, log_p = shapiro(y_log.iloc[idx])
             boxcox_stat, boxcox_p = shapiro(y_boxcox[idx]) if boxcox_details else (0, 0)
+            yeojohnson_stat, yeojohnson_p = shapiro(y_yeojohnson[idx]) if yeojohnson_details else (0, 0)
             sqrt_stat, sqrt_p = shapiro(y_sqrt.iloc[idx])
         else:
             log_stat, log_p = shapiro(y_log)
             boxcox_stat, boxcox_p = shapiro(y_boxcox) if boxcox_details else (0, 0)
+            yeojohnson_stat, yeojohnson_p = shapiro(y_yeojohnson) if yeojohnson_details else (0, 0)
             sqrt_stat, sqrt_p = shapiro(y_sqrt)
         
         # Higher p-value indicates more normality
-        p_values = {'log': log_p, 'boxcox': boxcox_p if boxcox_details else 0, 'sqrt': sqrt_p}
+        p_values = {
+            'log': log_p, 
+            'boxcox': boxcox_p if boxcox_details else 0, 
+            'yeojohnson': yeojohnson_p if yeojohnson_details else 0,
+            'sqrt': sqrt_p
+        }
         best_transform = max(p_values, key=p_values.get)
         
         self.logger.info(f"Transformation normality tests (p-values, higher is better):")
         self.logger.info(f"Log: {log_p:.6f}")
         self.logger.info(f"Box-Cox: {boxcox_p:.6f}" if boxcox_details else "Box-Cox: Not available")
+        self.logger.info(f"Yeo-Johnson: {yeojohnson_p:.6f}" if yeojohnson_details else "Yeo-Johnson: Not available")
         self.logger.info(f"Square root: {sqrt_p:.6f}")
         self.logger.info(f"Selected: {best_transform} transformation")
         
@@ -826,7 +865,19 @@ class RefinedPipeline:
         if best_transform == 'log':
             return y_log, {'name': 'log', 'transform': np.log1p, 'inverse': np.expm1}
         elif best_transform == 'boxcox' and boxcox_details:
-            return y_boxcox, boxcox_details
+            # Important: Convert the numpy array to a pandas Series with the same index
+            return pd.Series(y_boxcox, index=y_train.index), {
+                'name': 'boxcox', 
+                'lambda': lambda_param,
+                'inverse': lambda x: special.inv_boxcox(x, lambda_param)
+            }
+        elif best_transform == 'yeojohnson' and yeojohnson_details:
+            # Important: Convert the numpy array to a pandas Series with the same index
+            return pd.Series(y_yeojohnson, index=y_train.index), {
+                'name': 'yeojohnson', 
+                'lambda': yj_param,
+                'inverse': lambda x: stats.inv_yeojohnson(x, yj_param)
+            }
         else:
             return y_sqrt, {'name': 'sqrt', 'transform': np.sqrt, 'inverse': np.square}
 
