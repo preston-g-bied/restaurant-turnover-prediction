@@ -98,6 +98,8 @@ class FeatureProcessor:
         
         # Create interaction features (original method)
         X_processed = self._create_interaction_features(X_processed)
+
+        X_processed = self._create_advanced_composite_features(X_processed)
         
         # Feature selection (if y is provided)
         if y is not None:
@@ -145,6 +147,8 @@ class FeatureProcessor:
         
         # Create interaction features (original method)
         X_processed = self._create_interaction_features(X_processed)
+
+        X_processed = self._create_advanced_composite_features(X_processed)
         
         # Apply feature selection
         if apply_selection and self.selected_features is not None:
@@ -809,6 +813,129 @@ class FeatureProcessor:
                 X_with_interactions[f'{feature}_squared'] = X[feature] ** 2
         
         return X_with_interactions
+    
+    def _create_advanced_composite_features(self, X):
+        """
+        Create advanced composite features combining multiple variables.
+        
+        Parameters:
+        -----------
+        X : pandas.DataFrame
+            Input data
+            
+        Returns:
+        --------
+        pandas.DataFrame
+            Data with composite features
+        """
+        self.logger.info('Creating advanced composite features')
+        X_composite = X.copy()
+        
+        # Quality composite (different weightings of restaurant ratings)
+        rating_cols = ['Food Rating', 'Hygiene Rating', 'Overall Restaurant Rating', 'Restaurant Zomato Rating']
+        if all(col in X.columns for col in rating_cols[:3]):
+            # Primary quality score (internal ratings)
+            X_composite['quality_score_internal'] = (
+                X['Food Rating'] * 0.4 + 
+                X['Hygiene Rating'] * 0.35 + 
+                X['Overall Restaurant Rating'] * 0.25
+            )
+        
+        if all(col in X.columns for col in [rating_cols[3], 'Food Rating']):
+            # External vs. internal perception
+            X_composite['external_internal_alignment'] = (
+                X['Restaurant Zomato Rating'] / (X['Food Rating'] / 2.0 + 0.1)
+            )
+        
+        # Service quality composite
+        service_cols = ['Staff Responsivness', 'Service', 'Order Wait Time']
+        if all(col in X.columns for col in service_cols[:2]):
+            X_composite['service_quality'] = (
+                X['Staff Responsivness'] * 0.6 + 
+                X['Service'] * 0.4
+            )
+        
+        if all(col in X.columns for col in [service_cols[2], service_cols[0]]):
+            # Efficiency metric (inverse relationship with wait time)
+            X_composite['service_efficiency'] = (
+                X['Staff Responsivness'] / (X['Order Wait Time'] + 1)
+            )
+        
+        # Social media impact composite
+        social_cols = ['Facebook Popularity Quotient', 'Instagram Popularity Quotient']
+        if all(col in X.columns for col in social_cols):
+            # Social media reach
+            X_composite['social_media_reach'] = (
+                X['Facebook Popularity Quotient'] * 0.5 + 
+                X['Instagram Popularity Quotient'] * 0.5
+            )
+            
+            # Social media balance (close to 1 means balanced, far from 1 means imbalanced)
+            X_composite['social_media_balance'] = (
+                X['Facebook Popularity Quotient'] / 
+                (X['Instagram Popularity Quotient'] + 0.1)
+            )
+        
+        # Experience quality metrics
+        exp_cols = ['Ambience', 'Lively', 'Comfortablility', 'Privacy']
+        if all(col in X.columns for col in exp_cols[:2]):
+            X_composite['atmosphere_quality'] = (
+                X['Ambience'] * 0.6 + 
+                X['Lively'] * 0.4
+            )
+        
+        if all(col in X.columns for col in exp_cols[2:]):
+            X_composite['comfort_factor'] = (
+                X['Comfortablility'] * 0.7 + 
+                X['Privacy'] * 0.3
+            )
+        
+        # Restaurant age impact features
+        if 'restaurant_age_years' in X.columns:
+            # For ratings that might improve with time
+            for col in ['Food Rating', 'Overall Restaurant Rating', 'Hygiene Rating']:
+                if col in X.columns:
+                    # Age-adjusted rating (higher weight for older restaurants)
+                    X_composite[f'age_adjusted_{col.lower().replace(" ", "_")}'] = (
+                        X[col] * (1 + np.log1p(X['restaurant_age_years']) / 10)
+                    )
+            
+            # Reputation building factor
+            if 'Restaurant Zomato Rating' in X.columns:
+                X_composite['reputation_building'] = (
+                    X['Restaurant Zomato Rating'] * np.tanh(X['restaurant_age_years'] / 3)
+                )
+        
+        # Value perception metric
+        if all(col in X.columns for col in ['Value for Money', 'Food Rating']):
+            X_composite['value_perception'] = (
+                X['Value for Money'] / (X['Food Rating'] / 10 + 0.1)
+            )
+        
+        # Entertainment factor
+        ent_cols = ['offers_live_music', 'offers_comedy_gigs', 'offers_value_deals', 'offers_live_sports']
+        present_cols = [col for col in ent_cols if col in X.columns]
+        
+        if present_cols and 'entertainment_options_count' in X.columns:
+            # Entertainment diversity impact
+            X_composite['entertainment_diversity_impact'] = (
+                X['entertainment_options_count'] * 
+                (np.log1p(X['entertainment_options_count']) + 1)
+            )
+        
+        # Location impact amplifiers
+        if 'Restaurant Location_Near Party Hub' in X.columns and 'Lively' in X.columns:
+            X_composite['party_hub_atmosphere'] = (
+                X['Restaurant Location_Near Party Hub'] * X['Lively'] * 1.5
+            )
+        
+        if 'Restaurant Location_Near Business Hub' in X.columns and 'Food Rating' in X.columns:
+            X_composite['business_hub_quality'] = (
+                (1 - X['Restaurant Location_Near Party Hub']) * X['Food Rating'] * 1.2
+            )
+        
+        self.logger.info(f'Created {len(X_composite.columns) - len(X.columns)} new composite features')
+        return X_composite
     
     def _fit_select_features(self, X, y, k=40):
         """
